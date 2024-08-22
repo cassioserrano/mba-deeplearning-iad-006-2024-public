@@ -1,0 +1,51 @@
+from fastapi import FastAPI, File
+from pydantic import BaseModel
+import xgboost as xgb
+import warnings
+import pickle
+import numpy as np
+
+import base64
+from PIL import Image
+import io
+
+warnings.simplefilter(action='ignore', category=DeprecationWarning)
+
+app = FastAPI()
+
+class PredictionResponse(BaseModel):
+    prediction: float
+
+class ImageRequest(BaseModel):
+    image: str
+
+def load_model():
+    global xgb_model_carregado
+    with open('ensemble_classifier_model.pkl', 'rb') as f:
+        xgb_model_carregado = pickle.load(f)
+
+@app.on_event('startup')
+async def startup_event():
+    load_model()
+
+@app.post('/predict', response_model=PredictionResponse)
+async def predict(request: ImageRequest):
+    img_bytes = base64.b64decode(request.image)
+    img = Image.open(io.BytesIO(img_bytes))
+    img = img.resize((8, 8))
+
+    img_array = np.array(img)
+
+    # Converter para escala de cinza
+    img_array = np.dot(img_array[...,:3], [0.2989, 0.5870, 0.1140])
+
+    # Redimensionar para o formato que o modelo espera
+    img_array = img_array.reshape(1, -1)
+
+    prediction = xgb_model_carregado.predict(img_array)
+
+    return {"prediction": float(prediction[0])}
+
+@app.post("/healthcheck")
+async def healthcheck():
+    return {"status": "ok"}
